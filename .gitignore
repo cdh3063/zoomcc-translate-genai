@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+oci-translator.env
+.DS_Store
+*.swp
+*.swo
+.env
