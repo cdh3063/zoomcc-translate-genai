@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "ZoomCaptionTranslator",
+    name: "ZoomCCTranslateGenAI",
     platforms: [
         .macOS(.v13)
     ],
@@ -12,7 +12,7 @@ let package = Package(
             targets: ["ZoomCaptionCore"]
         ),
         .executable(
-            name: "zoom-caption-translator",
+            name: "zoomcc-translate-genai",
             targets: ["ZoomCaptionTranslator"]
         )
     ],

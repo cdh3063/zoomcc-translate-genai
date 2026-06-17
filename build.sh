@@ -22,6 +22,6 @@ mkdir -p "$BUILD_DIR/manual" "$BUILD_DIR/release" "$BUILD_DIR/module-cache"
   -I "$BUILD_DIR/manual" \
   "$ROOT_DIR/Sources/ZoomCaptionTranslator/main.swift" \
   "$BUILD_DIR/manual/CaptionStabilizer.o" \
-  -o "$BUILD_DIR/release/zoom-caption-translator"
+  -o "$BUILD_DIR/release/zoomcc-translate-genai"
 
-echo "$BUILD_DIR/release/zoom-caption-translator"
+echo "$BUILD_DIR/release/zoomcc-translate-genai"

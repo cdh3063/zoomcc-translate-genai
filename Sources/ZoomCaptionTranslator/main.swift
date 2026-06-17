@@ -196,10 +196,10 @@ struct AppConfig {
 
     static var help: String {
         """
-        Zoom Caption Translator MVP
+        zoomcc-translate-genai
 
         Usage:
-          zoom-caption-translator [options]
+          zoomcc-translate-genai [options]
 
         Options:
           --app-name NAME             Source app name to scan with Accessibility. Default: Zoom
@@ -662,7 +662,7 @@ final class OCRCaptionReader: CaptionReader {
 
     private func captureRegion() -> CGImage? {
         let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("zoom-caption-ocr-\(UUID().uuidString).png")
+            .appendingPathComponent("zoomcc-translate-genai-ocr-\(UUID().uuidString).png")
         defer {
             try? FileManager.default.removeItem(at: fileURL)
         }
@@ -752,7 +752,7 @@ final class OCRCaptionReader: CaptionReader {
     }
 
     private func saveLatestImage(_ image: CGImage) {
-        let debugURL = URL(fileURLWithPath: "/tmp/zoom-caption-ocr-latest.png")
+        let debugURL = URL(fileURLWithPath: "/tmp/zoomcc-translate-genai-ocr-latest.png")
         let bitmap = NSBitmapImageRep(cgImage: image)
         let data = bitmap.representation(using: .png, properties: [:])
         try? data?.write(to: debugURL)
@@ -1520,7 +1520,7 @@ private final class DraggableOverlayView: NSView {
 final class OverlayWindowController {
     private let panel: NSPanel
     private let label: NSTextField
-    private static let savedPositionURL = URL(fileURLWithPath: "/tmp/zoom-caption-overlay-position.txt")
+    private static let savedPositionURL = URL(fileURLWithPath: "/tmp/zoomcc-translate-genai-overlay-position.txt")
 
     init(config: AppConfig) {
         let frame = Self.makeFrame(config: config)
@@ -1838,7 +1838,7 @@ private func saveOCRSelectionState(config: AppConfig) {
     }
 
     let text = lines.joined(separator: "\n") + "\n"
-    try? text.write(to: URL(fileURLWithPath: "/tmp/zoom-caption-ocr-selection.txt"), atomically: true, encoding: .utf8)
+    try? text.write(to: URL(fileURLWithPath: "/tmp/zoomcc-translate-genai-ocr-selection.txt"), atomically: true, encoding: .utf8)
 }
 
 private var retainedDelegate: AppController?

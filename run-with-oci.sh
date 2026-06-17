@@ -112,4 +112,4 @@ if [[ "${USE_ACCESSIBILITY:-0}" != "1" ]]; then
   fi
 fi
 
-"$ROOT_DIR/.build/release/zoom-caption-translator" "${args[@]}" "$@"
+"$ROOT_DIR/.build/release/zoomcc-translate-genai" "${args[@]}" "$@"
