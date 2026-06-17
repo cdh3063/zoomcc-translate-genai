@@ -23,7 +23,7 @@ public final class CaptionStabilizer {
     private var pendingSince: Date?
     private var emittedText: String?
 
-    public init(stableAfter: TimeInterval = 0.8, normalizer: CaptionNormalizer = CaptionNormalizer()) {
+    public init(stableAfter: TimeInterval = 0.6, normalizer: CaptionNormalizer = CaptionNormalizer()) {
         self.stableAfter = stableAfter
         self.normalizer = normalizer
     }

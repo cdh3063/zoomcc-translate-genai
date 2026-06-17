@@ -63,8 +63,8 @@ struct AppConfig {
     var provider = ProviderName.mock
     var targetLanguage = "KO"
     var sourceLanguage: String?
-    var pollInterval: TimeInterval = 0.25
-    var stableAfter: TimeInterval = 0.35
+    var pollInterval: TimeInterval = 0.2
+    var stableAfter: TimeInterval = 0.6
     var forceOCR = false
     var selectOCRRegion = false
     var ocrRegion: CGRect?
@@ -208,8 +208,8 @@ struct AppConfig {
                                      Translation provider. Default: mock
           --target-lang CODE          Target language. Default: KO
           --source-lang CODE          Optional source language.
-          --interval SECONDS          Poll interval. Default: 0.25
-          --stable-after SECONDS      Wait until caption text is stable. Default: 0.35
+          --interval SECONDS          Poll interval. Default: 0.2
+          --stable-after SECONDS      Wait until caption text is stable. Default: 0.6
           --ocr-region x,y,w,h        OCR fallback region on the main display.
           --ocr-display NUMBER        Display number for OCR capture. Usually 1 for main display.
           --ocr-anchor ID:x,y,w,h     Stable display ID and normalized region from a prior selection.
