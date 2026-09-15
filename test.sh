@@ -15,3 +15,4 @@ SWIFTC="${SWIFTC:-swiftc}"
   -o "$BUILD_DIR/manual/core-smoke-test"
 
 "$BUILD_DIR/manual/core-smoke-test"
+python3 "$ROOT_DIR/Scripts/translation-smoke-test.py"
