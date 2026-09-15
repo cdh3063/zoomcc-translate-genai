@@ -228,18 +228,21 @@ public struct CaptionTranslation: Hashable, Sendable {
 }
 
 public struct CaptionContext {
-    private var recent: [String] = []
+    private var recent: [(utteranceID: Int, text: String)] = []
 
     public init() {}
 
-    public func prepare(_ text: String, isComplete: Bool = true) -> CaptionTranslation {
-        CaptionTranslation(text: text, context: recent, isComplete: isComplete)
+    public func prepare(_ text: String, utteranceID: Int, isComplete: Bool = true) -> CaptionTranslation {
+        let context = recent.filter { $0.utteranceID != utteranceID }.suffix(3).map(\.text)
+        return CaptionTranslation(text: text, context: context, isComplete: isComplete)
     }
 
-    public mutating func remember(_ text: String, isComplete: Bool = true) {
-        guard isComplete else { return }
-        recent.append(String(text.suffix(600)))
-        recent = Array(recent.suffix(3))
+    public mutating func remember(_ text: String, utteranceID: Int) {
+        // Retain replaced subtitle cues even without punctuation, but keep only
+        // the latest revision so a preview cannot become its own context.
+        recent.removeAll { $0.utteranceID == utteranceID }
+        recent.append((utteranceID, String(text.suffix(600))))
+        recent = Array(recent.suffix(4))
     }
 
     public mutating func reset() {
