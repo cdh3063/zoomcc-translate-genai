@@ -116,7 +116,7 @@ try:
             else:
                 assert "reasoning" not in body
             data = json.loads(body["input"])
-        assert data == {"caption": "Partners can use credits.", "context": []}
+        assert data == {"caption": "Partners can use credits.", "context": [], "is_complete": True}
     print(f"translation transport tests passed ({len(cases)} cases)")
 finally:
     server.shutdown()

@@ -25,8 +25,12 @@ public final class CaptionStabilizer {
     private var pendingStartedAt: Date?
     private var emittedText: String?
     private var committedText = ""
+    private var sentenceText = ""
+    private var utteranceID = 0
+    private var lastObservedAt: Date?
     public private(set) var lastWait: TimeInterval = 0
     public private(set) var lastEmissionWasComplete = false
+    public private(set) var lastEmissionID = 0
 
     public init(stableAfter: TimeInterval = 0.6, maxWait: TimeInterval = 2, normalizer: CaptionNormalizer = CaptionNormalizer()) {
         self.stableAfter = stableAfter
@@ -36,14 +40,33 @@ public final class CaptionStabilizer {
 
     public func update(_ raw: String, now: Date = Date()) -> String? {
         let text = normalizer.normalize(raw)
+        guard !text.isEmpty else {
+            clearPending()
+            return nil
+        }
+        if let lastObservedAt, now.timeIntervalSince(lastObservedAt) > 5 {
+            reset()
+        }
+        lastObservedAt = now
         let remaining = CaptionText.removingOverlap(previous: committedText, current: text)
         guard !remaining.isEmpty else {
             clearPending()
             return nil
         }
 
-        let complete = CaptionText.completePrefix(remaining)
-        let candidate = complete.isEmpty ? remaining : complete
+        if !sentenceText.isEmpty,
+           let joined = CaptionText.continuing(previous: sentenceText, current: remaining),
+           joined.count <= max(2400, remaining.count) {
+            sentenceText = joined
+        } else {
+            sentenceText = remaining
+            utteranceID += 1
+            emittedText = nil
+            clearPending()
+        }
+
+        let complete = CaptionText.completePrefix(sentenceText)
+        let candidate = complete.isEmpty ? sentenceText : complete
 
         guard candidate != emittedText else {
             clearPending()
@@ -65,8 +88,11 @@ public final class CaptionStabilizer {
 
         lastWait = now.timeIntervalSince(pendingStartedAt)
         lastEmissionWasComplete = !complete.isEmpty
+        lastEmissionID = utteranceID
         if lastEmissionWasComplete {
-            committedText = String(text.prefix(text.count - remaining.count + candidate.count))
+            committedText = String((committedText + " " + candidate).trimmingCharacters(in: .whitespaces).suffix(4800))
+            sentenceText = String(sentenceText.dropFirst(candidate.count)).trimmingCharacters(in: .whitespaces)
+            utteranceID += 1
             emittedText = nil
         } else {
             emittedText = candidate
@@ -79,6 +105,8 @@ public final class CaptionStabilizer {
         clearPending()
         emittedText = nil
         committedText = ""
+        sentenceText = ""
+        lastObservedAt = nil
         lastWait = 0
         lastEmissionWasComplete = false
     }
@@ -91,6 +119,49 @@ public final class CaptionStabilizer {
 }
 
 public enum CaptionText {
+    public static func continuing(previous: String, current: String) -> String? {
+        if previous == current || previous.hasSuffix(" " + current) { return previous }
+        if current.hasPrefix(previous) || previous.hasPrefix(current) { return current }
+
+        let oldWords = previous.split(separator: " ").map(String.init)
+        let newWords = current.split(separator: " ").map(String.init)
+        let oldKeys = oldWords.map { $0.lowercased() }
+        let newKeys = newWords.map { $0.lowercased() }
+        let count = min(oldWords.count, newWords.count)
+        guard count >= 2 else { return nil }
+
+        for overlap in stride(from: count, through: 2, by: -1) {
+            if oldKeys.suffix(overlap).elementsEqual(newKeys.prefix(overlap)) {
+                return (oldWords.dropLast(overlap) + newWords).joined(separator: " ")
+            }
+        }
+
+        // Anchor revisions to matching words so corrections replace the visible
+        // window while the start of the sentence stays in the buffer.
+        var bestCount = 0
+        var bestOffset = 0
+        for oldIndex in oldKeys.indices {
+            for newIndex in newKeys.indices where oldKeys[oldIndex] == newKeys[newIndex] {
+                var matched = 0
+                while oldIndex + matched < oldKeys.count,
+                      newIndex + matched < newKeys.count,
+                      oldKeys[oldIndex + matched] == newKeys[newIndex + matched] {
+                    matched += 1
+                }
+                let sameStart = oldIndex == 0 && newIndex == 0 && matched >= 2
+                let anchored = matched >= 3 && (oldIndex + matched == oldKeys.count || matched * 2 >= count)
+                let offset = max(0, oldIndex - newIndex)
+                if offset > 0, newIndex > 0, oldKeys[offset] != newKeys[0] { continue }
+                if (sameStart || anchored), matched > bestCount {
+                    bestCount = matched
+                    bestOffset = offset
+                }
+            }
+        }
+        guard bestCount > 0 else { return nil }
+        return (oldWords.prefix(bestOffset) + newWords).joined(separator: " ")
+    }
+
     public static func completePrefix(_ text: String) -> String {
         var end = text.startIndex
         text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .bySentences) { sentence, range, _, stop in
@@ -114,8 +185,9 @@ public enum CaptionText {
         let oldWords = previous.split(separator: " ")
         let newWords = current.split(separator: " ")
         let count = min(oldWords.count, newWords.count)
-        guard count >= 2 else { return current }
-        for overlap in stride(from: count, through: 2, by: -1) {
+        guard count >= 1 else { return current }
+        for overlap in stride(from: count, through: 1, by: -1) {
+            if overlap == 1, completePrefix(String(newWords[0])) != String(newWords[0]) { continue }
             if oldWords.suffix(overlap).elementsEqual(newWords.prefix(overlap)) {
                 return newWords.dropFirst(overlap).joined(separator: " ")
             }
@@ -146,10 +218,12 @@ public struct CaptionLine {
 public struct CaptionTranslation: Hashable, Sendable {
     public let text: String
     public let context: [String]
+    public let isComplete: Bool
 
-    public init(text: String, context: [String] = []) {
+    public init(text: String, context: [String] = [], isComplete: Bool = true) {
         self.text = text
         self.context = context
+        self.isComplete = isComplete
     }
 }
 
@@ -158,20 +232,35 @@ public struct CaptionContext {
 
     public init() {}
 
-    public mutating func prepare(_ text: String) -> CaptionTranslation {
-        if let last = recent.last, text.hasPrefix(last) {
-            recent.removeLast()
-        }
-        return CaptionTranslation(text: text, context: recent)
+    public func prepare(_ text: String, isComplete: Bool = true) -> CaptionTranslation {
+        CaptionTranslation(text: text, context: recent, isComplete: isComplete)
     }
 
-    public mutating func remember(_ text: String) {
+    public mutating func remember(_ text: String, isComplete: Bool = true) {
+        guard isComplete else { return }
         recent.append(String(text.suffix(600)))
         recent = Array(recent.suffix(3))
     }
 
     public mutating func reset() {
         recent.removeAll()
+    }
+}
+
+public struct CaptionPresentation {
+    private var utteranceID: Int?
+    private var text = ""
+
+    public init() {}
+
+    public mutating func update(_ translation: String, utteranceID: Int, isFinal: Bool) -> String? {
+        if self.utteranceID == utteranceID {
+            if !isFinal, translation.count < text.count { return nil }
+            if translation == text { return nil }
+        }
+        self.utteranceID = utteranceID
+        text = translation
+        return translation
     }
 }
 

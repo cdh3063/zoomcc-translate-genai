@@ -61,6 +61,55 @@ expectNil(sentences.update("We invest in OCI. The next program offers credits.",
 expectEqual(sentences.update("in OCI. The next program offers credits.", now: start.addingTimeInterval(1.5)), "The next program offers credits.", "scrolling overlap does not repeat committed sentence")
 expectNil(sentences.update("The next program offers credits.", now: start.addingTimeInterval(2.2)), "committed sentence is not translated again")
 
+let scrolling = CaptionStabilizer()
+let scrollingFrames = [
+    "Partners can use the credits to",
+    "use the credits to offset infrastructure",
+    "to offset infrastructure costs, but unused",
+    "infrastructure costs, but unused credits do not",
+    "unused credits do not roll over."
+]
+for (index, frame) in scrollingFrames.enumerated() {
+    expectNil(scrolling.update(frame, now: start.addingTimeInterval(Double(index) * 0.2)), "scrolling sentence is still being collected")
+}
+expectEqual(
+    scrolling.update(scrollingFrames.last!, now: start.addingTimeInterval(1.5)),
+    "Partners can use the credits to offset infrastructure costs, but unused credits do not roll over.",
+    "scrolling keeps the beginning and negation of the whole sentence"
+)
+expectNil(scrolling.update(scrollingFrames.last!, now: start.addingTimeInterval(2.2)), "the assembled sentence is committed only once")
+
+let revisions = CaptionStabilizer()
+expectNil(revisions.update("Partners can use credits to", now: start), "partial sentence begins")
+expectEqual(revisions.update("Partners can use credits to", now: start.addingTimeInterval(0.7)), "Partners can use credits to", "initial partial can be displayed promptly")
+let partialID = revisions.lastEmissionID
+expectNil(revisions.update("use credits to offset infrastructure", now: start.addingTimeInterval(0.8)), "scrolling extends the current partial")
+expectEqual(revisions.update("use credits to offset infrastructure", now: start.addingTimeInterval(1.5)), "Partners can use credits to offset infrastructure", "partial revisions retain the sentence start")
+expectEqual(revisions.lastEmissionID, partialID, "partial revisions share the same utterance ID")
+expectNil(revisions.update("credits to offset operating costs.", now: start.addingTimeInterval(1.6)), "corrected final wording becomes pending")
+expectEqual(revisions.update("credits to offset operating costs.", now: start.addingTimeInterval(2.3)), "Partners can use credits to offset operating costs.", "corrections replace visible words without losing the start")
+expectEqual(revisions.lastEmissionID, partialID, "the final translation replaces its partial previews")
+expectEqual(revisions.lastEmissionWasComplete, true, "completed revision is final")
+expectNil(revisions.update("costs. They expire tomorrow.", now: start.addingTimeInterval(2.4)), "next sentence begins after committed suffix")
+expectEqual(revisions.update("They expire tomorrow.", now: start.addingTimeInterval(3.1)), "They expire tomorrow.", "next sentence is a separate utterance")
+expectEqual(revisions.lastEmissionID > partialID, true, "new utterance gets a new ID")
+
+expectEqual(CaptionText.continuing(previous: "Our partners receive credits", current: "A different topic begins"), nil, "unrelated captions are not joined")
+expectEqual(CaptionText.continuing(previous: "Our partners can use credits to offset", current: "They can use credits to offset costs."), nil, "matching phrases do not manufacture an unobserved subject")
+expectEqual(CaptionText.continuing(previous: "The price is 20 dollars", current: "The price is 30 dollars"), "The price is 30 dollars", "recognition corrections replace old numbers")
+expectEqual(CaptionText.continuing(previous: "We plan to invest", current: "We plan to invest more"), "We plan to invest more", "growing words and phrases are preserved")
+
+let resetOnGap = CaptionStabilizer()
+expectNil(resetOnGap.update("Partners can use credits", now: start), "gap test starts a sentence")
+expectNil(resetOnGap.update("credits expire tomorrow.", now: start.addingTimeInterval(6)), "long capture gap starts a new utterance")
+expectEqual(resetOnGap.update("credits expire tomorrow.", now: start.addingTimeInterval(6.7)), "credits expire tomorrow.", "old sentence is not carried over a capture gap")
+
+let bounded = CaptionStabilizer()
+expectNil(bounded.update("The program grows", now: start), "bounded buffer starts")
+expectNil(bounded.update("The program grows " + String(repeating: "steadily ", count: 270), now: start.addingTimeInterval(0.2)), "unpunctuated text can be longer than the retained prefix limit")
+expectNil(bounded.update("steadily steadily continues today", now: start.addingTimeInterval(0.4)), "oversized carried text is released")
+expectEqual(bounded.update("steadily steadily continues today", now: start.addingTimeInterval(1.1)), "steadily steadily continues today", "retained history cannot grow indefinitely")
+
 let blanks = CaptionStabilizer()
 expectNil(blanks.update("a caption", now: start), "blank test begins pending")
 expectNil(blanks.update("", now: start.addingTimeInterval(1)), "blank breaks stability")
@@ -76,16 +125,26 @@ expectEqual(CaptionText.removingOverlap(previous: "That is a benefit.", current:
 
 var context = CaptionContext()
 expectEqual(context.prepare("Our partners").context, [], "first caption has no context")
-context.remember("Our partners")
+context.remember("Our partners", isComplete: false)
 expectEqual(context.prepare("Our partners receive credits.").context, [], "revised partial is not its own context")
 context.remember("Our partners receive credits.")
 expectEqual(context.prepare("They can use them.").context, ["Our partners receive credits."], "prior statement is sent as context")
+context.remember("They can use", isComplete: false)
+expectEqual(context.prepare("They can use them.").context, ["Our partners receive credits."], "partial previews never become separate context sentences")
+expectEqual(context.prepare("They can use", isComplete: false).isComplete, false, "unfinished state is included in translation input")
 context.remember("They can use them.")
 context.remember("Third.")
 context.remember("Fourth.")
 expectEqual(context.prepare("Fifth.").context, ["They can use them.", "Third.", "Fourth."], "context is bounded to three captions")
 context.reset()
 expectEqual(context.prepare("New meeting.").context, [], "context resets between conversations")
+
+var presentation = CaptionPresentation()
+expectEqual(presentation.update("Partners can use credits", utteranceID: 1, isFinal: true), "Partners can use credits", "first partial translation is visible")
+expectNil(presentation.update("Partners", utteranceID: 1, isFinal: false), "retranslation does not erase an already visible sentence")
+expectEqual(presentation.update("Partners can use credits for costs", utteranceID: 1, isFinal: false), "Partners can use credits for costs", "extended translation replaces its preview")
+expectEqual(presentation.update("Credits offset costs.", utteranceID: 1, isFinal: true), "Credits offset costs.", "a corrected final can be shorter than the preview")
+expectEqual(presentation.update("Unused", utteranceID: 2, isFinal: false), "Unused", "a new utterance starts independently")
 
 var events = ServerSentEvents()
 let stream = ": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\r\ndata: \"response.output_text.delta\",\"delta\":\"\u{d55c}\u{ae00}\"}\r\n\r\ndata: [DONE]\n\n"
