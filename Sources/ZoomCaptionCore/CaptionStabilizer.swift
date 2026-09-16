@@ -253,13 +253,20 @@ public struct CaptionContext {
 public struct CaptionPresentation {
     private var utteranceID: Int?
     private var text = ""
+    private var finishedText = ""
+    public private(set) var previousText = ""
 
     public init() {}
 
     public mutating func update(_ translation: String, utteranceID: Int, isFinal: Bool) -> String? {
+        guard !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         if self.utteranceID == utteranceID {
             if !isFinal, translation.count < text.count { return nil }
+            if isFinal { finishedText = translation }
             if translation == text { return nil }
+        } else {
+            if !finishedText.isEmpty { previousText = finishedText }
+            finishedText = isFinal ? translation : ""
         }
         self.utteranceID = utteranceID
         text = translation

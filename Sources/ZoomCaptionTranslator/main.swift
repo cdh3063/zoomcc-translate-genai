@@ -75,7 +75,7 @@ struct AppConfig {
     var ocrAnchor: OCRAnchor?
     var ocrLineLimit = 2
     var overlayWidth: CGFloat = 980
-    var overlayHeight: CGFloat = 132
+    var overlayHeight: CGFloat = 240
     var overlayX: CGFloat?
     var overlayY: CGFloat?
     var overlayFontSize: CGFloat = 30
@@ -222,8 +222,8 @@ struct AppConfig {
           --ocr-lines COUNT           Keep the latest bottom OCR lines. Default: 2
           --select-ocr-region         Drag to select the OCR fallback region before starting.
           --force-ocr                 Skip Accessibility and use OCR only.
-          --overlay-width POINTS      Overlay width. Default: 980
-          --overlay-height POINTS     Overlay height. Default: 132
+          --overlay-width POINTS      Overlay width. Minimum: 320. Default: 980
+          --overlay-height POINTS     Overlay height. Minimum: 180. Default: 240
           --overlay-x POINTS          Overlay x position from the lower-left screen origin.
           --overlay-y POINTS          Overlay y position from the lower-left screen origin.
           --font-size POINTS          Overlay font size. Default: 30
@@ -1523,11 +1523,64 @@ struct DeepLResponse: Decodable {
     let translations: [Translation]
 }
 
-private final class DraggableOverlayView: NSView {
+final class DraggableOverlayView: NSView {
     var onMoved: ((NSPoint) -> Void)?
+    private let previousLabel = NSTextField(labelWithString: "")
+    private let currentLabel = NSTextField(labelWithString: "")
+    private let fontSize: CGFloat
     private var dragStartMouseLocation: NSPoint?
     private var dragStartFrameOrigin: NSPoint?
     private var didPushCursor = false
+
+    init(frame: NSRect, fontSize: CGFloat) {
+        self.fontSize = fontSize
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.76).cgColor
+        layer?.cornerRadius = 8
+        for label in [previousLabel, currentLabel] {
+            label.alignment = .center
+            label.lineBreakMode = .byWordWrapping
+            label.lineBreakStrategy = .hangulWordPriority
+            label.maximumNumberOfLines = 0
+            label.cell?.usesSingleLineMode = false
+            label.cell?.wraps = true
+            label.cell?.truncatesLastVisibleLine = true
+            addSubview(label)
+        }
+        previousLabel.textColor = NSColor.white.withAlphaComponent(0.72)
+        currentLabel.textColor = .white
+    }
+
+    required init?(coder: NSCoder) { return nil }
+
+    func update(text: String, previousText: String? = nil) {
+        currentLabel.stringValue = text
+        if let previousText { previousLabel.stringValue = previousText }
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        let area = bounds.insetBy(dx: 18, dy: 14)
+        let previousHeight = floor((area.height - 12) * 0.36)
+        previousLabel.frame = NSRect(x: area.minX, y: area.maxY - previousHeight, width: area.width, height: previousHeight)
+        currentLabel.frame = NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height - previousHeight - 12)
+        fit(previousLabel, size: fontSize * 0.8, weight: .regular)
+        fit(currentLabel, size: fontSize, weight: .semibold)
+    }
+
+    private func fit(_ label: NSTextField, size: CGFloat, weight: NSFont.Weight) {
+        var size = max(12, size)
+        let measuringBounds = NSRect(x: 0, y: 0, width: label.bounds.width, height: .greatestFiniteMagnitude)
+        repeat {
+            label.font = .systemFont(ofSize: size, weight: weight)
+            let height = label.cell?.cellSize(forBounds: measuringBounds).height ?? 0
+            if height <= label.bounds.height || size <= 12 { break }
+            size = max(12, size - 1)
+        } while true
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         self
@@ -1617,7 +1670,7 @@ private final class DraggableOverlayView: NSView {
 
 final class OverlayWindowController {
     private let panel: NSPanel
-    private let label: NSTextField
+    private let content: DraggableOverlayView
     private static let savedPositionURL = URL(fileURLWithPath: "/tmp/zoomcc-translate-genai-overlay-position.txt")
 
     init(config: AppConfig) {
@@ -1635,42 +1688,26 @@ final class OverlayWindowController {
         panel.ignoresMouseEvents = !config.overlayDraggable
         panel.isOpaque = false
 
-        let container = DraggableOverlayView(frame: NSRect(origin: .zero, size: frame.size))
-        container.onMoved = { origin in
+        content = DraggableOverlayView(frame: NSRect(origin: .zero, size: frame.size), fontSize: config.overlayFontSize)
+        content.onMoved = { origin in
             Self.savePosition(origin)
         }
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.76).cgColor
-        container.layer?.cornerRadius = 8
-
-        label = NSTextField(labelWithString: "")
-        label.frame = container.bounds.insetBy(dx: 18, dy: 14)
-        label.autoresizingMask = [.width, .height]
-        label.alignment = .center
-        label.font = .systemFont(ofSize: config.overlayFontSize, weight: .semibold)
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 4
-        label.textColor = .white
-        label.cell?.usesSingleLineMode = false
-        label.cell?.wraps = true
-
-        container.addSubview(label)
-        panel.contentView = container
+        panel.contentView = content
     }
 
     func show() {
         panel.orderFrontRegardless()
     }
 
-    func update(text: String) {
-        label.stringValue = text
+    func update(text: String, previousText: String? = nil) {
+        content.update(text: text, previousText: previousText)
         panel.orderFrontRegardless()
     }
 
     private static func makeFrame(config: AppConfig) -> NSRect {
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let width = min(config.overlayWidth, max(320, screen.width - 40))
-        let height = min(config.overlayHeight, max(90, screen.height - 40))
+        let width = min(max(320, config.overlayWidth), max(320, screen.width - 40))
+        let height = min(max(180, config.overlayHeight), max(180, screen.height - 40))
         let savedPosition = config.overlayX == nil && config.overlayY == nil ? loadSavedPosition() : nil
         let x = config.overlayX ?? savedPosition?.x ?? (screen.midX - width / 2)
         let y = config.overlayY ?? savedPosition?.y ?? (screen.minY + 80)
@@ -1881,7 +1918,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let visible = presentation.update(text, utteranceID: job.utteranceID, isFinal: isFinal) else {
             return false
         }
-        overlay.update(text: visible)
+        overlay.update(text: visible, previousText: presentation.previousText)
         return true
     }
 
@@ -2009,6 +2046,9 @@ private func saveOCRSelectionState(config: AppConfig) {
     try? text.write(to: URL(fileURLWithPath: "/tmp/zoomcc-translate-genai-ocr-selection.txt"), atomically: true, encoding: .utf8)
 }
 
+#if OVERLAY_SMOKE_TEST
+MainActor.assumeIsolated { runOverlaySmokeTests() }
+#else
 private var retainedDelegate: AppController?
 
 do {
@@ -2107,3 +2147,4 @@ do {
     fputs("Error: \(error)\n\n\(AppConfig.help)\n", stderr)
     exit(2)
 }
+#endif
